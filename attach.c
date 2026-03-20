@@ -603,6 +603,134 @@ int kill_main(int force)
 	return 1;
 }
 
+int rm_main(int all)
+{
+	char log_path[600];
+
+	if (!all) {
+		const char *name = session_shortname();
+		int s;
+
+		snprintf(log_path, sizeof(log_path), "%s.log", sockname);
+
+		s = connect_socket(sockname);
+		if (s >= 0) {
+			close(s);
+			printf("%s: session '%s' is running"
+			       " (use '%s kill %s' first)\n",
+			       progname, name, progname, name);
+			return 1;
+		}
+
+		if (errno == ECONNREFUSED) {
+			unlink(sockname);
+			unlink(log_path);
+			if (!quiet)
+				printf("%s: session '%s' removed\n",
+				       progname, name);
+			return 0;
+		}
+
+		if (errno == ENOENT) {
+			struct stat st;
+
+			if (stat(log_path, &st) == 0) {
+				unlink(log_path);
+				if (!quiet)
+					printf("%s: session '%s' removed\n",
+					       progname, name);
+				return 0;
+			}
+			printf("%s: session '%s' does not exist\n",
+			       progname, name);
+			return 1;
+		}
+
+		printf("%s: %s: %s\n", progname, sockname, strerror(errno));
+		return 1;
+	}
+
+	/* Remove all stale + exited sessions. */
+	{
+		char dir[512];
+		char path[768];
+		char log_full[800];
+		DIR *d;
+		struct dirent *ent;
+		int count = 0;
+
+		get_session_dir(dir, sizeof(dir));
+
+		/* Pass 1: stale sockets (ECONNREFUSED). */
+		d = opendir(dir);
+		if (d) {
+			while ((ent = readdir(d)) != NULL) {
+				struct stat st;
+				int s;
+
+				if (ent->d_name[0] == '.')
+					continue;
+				snprintf(path, sizeof(path), "%s/%s",
+					 dir, ent->d_name);
+				if (stat(path, &st) < 0 ||
+				    !S_ISSOCK(st.st_mode))
+					continue;
+				s = connect_socket(path);
+				if (s >= 0) {
+					close(s);
+					continue;
+				}
+				if (errno != ECONNREFUSED)
+					continue;
+				snprintf(log_full, sizeof(log_full),
+					 "%s/%s.log", dir, ent->d_name);
+				unlink(path);
+				unlink(log_full);
+				if (!quiet)
+					printf("%s: removed %s\n",
+					       progname, ent->d_name);
+				count++;
+			}
+			closedir(d);
+		}
+
+		/* Pass 2: exited sessions (log only, no socket). */
+		d = opendir(dir);
+		if (d) {
+			while ((ent = readdir(d)) != NULL) {
+				size_t nlen = strlen(ent->d_name);
+
+				if (nlen <= 4 ||
+				    strcmp(ent->d_name + nlen - 4,
+					   ".log") != 0)
+					continue;
+				snprintf(path, sizeof(path), "%s/%.*s",
+					 dir, (int)(nlen - 4), ent->d_name);
+				if (access(path, F_OK) == 0)
+					continue;
+				snprintf(log_full, sizeof(log_full),
+					 "%s/%s", dir, ent->d_name);
+				unlink(log_full);
+				if (!quiet)
+					printf("%s: removed %.*s\n",
+					       progname, (int)(nlen - 4),
+					       ent->d_name);
+				count++;
+			}
+			closedir(d);
+		}
+
+		if (!quiet) {
+			if (count == 0)
+				printf("%s: nothing to remove\n", progname);
+			else
+				printf("%s: %d session(s) removed\n",
+				       progname, count);
+		}
+		return 0;
+	}
+}
+
 int list_main(int show_all)
 {
 	char dir[512];

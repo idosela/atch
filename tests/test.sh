@@ -708,7 +708,101 @@ assert_contains "tail -n missing arg: message"       "-n requires an argument" "
 
 tidy s-tail
 
-# ── 22. no-args → usage ──────────────────────────────────────────────────────
+# ── 22. rm command ───────────────────────────────────────────────────────────
+
+# rm with no session and no -a
+run "$ATCH" rm
+assert_exit     "rm: no session → exit 1"            1 "$rc"
+assert_contains "rm: no session → message"           "No session was specified" "$out"
+
+# rm nonexistent session (no socket, no log)
+run "$ATCH" rm s-noexist-rm
+assert_exit     "rm: nonexistent → exit 1"           1 "$rc"
+assert_contains "rm: nonexistent → message"          "does not exist" "$out"
+
+# rm a running session must be refused
+"$ATCH" start s-rm-live sleep 999
+run "$ATCH" rm s-rm-live
+assert_exit     "rm: running session → exit 1"       1 "$rc"
+assert_contains "rm: running session → message"      "is running" "$out"
+tidy s-rm-live
+rm -f "$HOME/.cache/atch/s-rm-live.log"
+
+# rm a stale session: simulate stale via run+kill-9
+"$ATCH" run s-rm-stale sleep 99999 &
+RM_STALE_PID=$!
+wait_socket s-rm-stale
+kill -9 "$RM_STALE_PID" 2>/dev/null
+sleep 0.1
+printf "stale-output\n" > "$HOME/.cache/atch/s-rm-stale.log"
+
+run "$ATCH" rm s-rm-stale
+assert_exit     "rm: stale → exit 0"                 0 "$rc"
+assert_contains "rm: stale → message"                "removed" "$out"
+# socket and log must be gone
+if [ -e "$HOME/.cache/atch/s-rm-stale" ]; then
+    fail "rm: stale socket removed"   "gone" "still exists"
+else
+    ok   "rm: stale socket removed"
+fi
+if [ -e "$HOME/.cache/atch/s-rm-stale.log" ]; then
+    fail "rm: stale log removed"      "gone" "still exists"
+else
+    ok   "rm: stale log removed"
+fi
+
+# rm an exited session (log only, no socket)
+printf "exited-output\n" > "$HOME/.cache/atch/s-rm-exited.log"
+run "$ATCH" rm s-rm-exited
+assert_exit     "rm: exited → exit 0"                0 "$rc"
+assert_contains "rm: exited → message"               "removed" "$out"
+if [ -e "$HOME/.cache/atch/s-rm-exited.log" ]; then
+    fail "rm: exited log removed"     "gone" "still exists"
+else
+    ok   "rm: exited log removed"
+fi
+
+# rm: extra arg rejected
+run "$ATCH" rm s-noexist-rm extra
+assert_exit     "rm: extra arg → exit 1"             1 "$rc"
+assert_contains "rm: extra arg → message"            "Invalid number of arguments" "$out"
+
+# rm -a: nothing to remove (clean state)
+rm -f "$HOME/.cache/atch"/*.log 2>/dev/null || true
+run "$ATCH" rm -a
+assert_exit     "rm -a: nothing → exit 0"            0 "$rc"
+assert_contains "rm -a: nothing → message"           "nothing to remove" "$out"
+
+# rm -a: removes stale and exited sessions, leaves live ones alone
+"$ATCH" run s-rma-stale sleep 99999 &
+RMA_STALE_PID=$!
+wait_socket s-rma-stale
+kill -9 "$RMA_STALE_PID" 2>/dev/null
+sleep 0.1
+printf "stale\n" > "$HOME/.cache/atch/s-rma-stale.log"
+printf "exited\n" > "$HOME/.cache/atch/s-rma-exited.log"
+"$ATCH" start s-rma-live sleep 999
+
+run "$ATCH" rm -a
+assert_exit     "rm -a: exits 0"                     0 "$rc"
+assert_contains "rm -a: reports removed sessions"    "removed" "$out"
+assert_contains "rm -a: removes stale"               "s-rma-stale" "$out"
+assert_contains "rm -a: removes exited"              "s-rma-exited" "$out"
+assert_not_contains "rm -a: skips live session"      "s-rma-live" "$out"
+
+# live session still present after rm -a
+run "$ATCH" list
+assert_contains "rm -a: live session still listed"   "s-rma-live" "$out"
+
+tidy s-rma-live
+rm -f "$HOME/.cache/atch/s-rma-live.log"
+
+# rm -a with extra arg rejected
+run "$ATCH" rm -a extra
+assert_exit     "rm -a: extra arg → exit 1"          1 "$rc"
+assert_contains "rm -a: extra arg → message"         "Invalid number of arguments" "$out"
+
+# ── 23. no-args → usage ──────────────────────────────────────────────────────
 
 # Invoking with zero arguments calls usage() (exits 0, prints help).
 # We already consumed the binary name in main, so argc < 1 → usage().
@@ -716,9 +810,10 @@ run "$ATCH"
 assert_exit     "no args: exits 0 (usage)"           0 "$rc"
 assert_contains "no args: shows Usage:"              "Usage:" "$out"
 
-# tail command appears in help
+# tail and rm commands appear in help
 run "$ATCH" --help
 assert_contains "help: shows tail command"           "tail" "$out"
+assert_contains "help: shows rm command"             "rm" "$out"
 
 # ── summary ──────────────────────────────────────────────────────────────────
 

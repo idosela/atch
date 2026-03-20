@@ -50,6 +50,7 @@ output is gone. With `atch` it is on disk until you clear it.
 - **History survives process exit** — re-opening a session shows the complete prior output before starting fresh
 - Push stdin directly to a running session
 - List sessions with liveness status; `list -a` also shows exited sessions that still have a log on disk
+- **One-command cleanup** — `rm <session>` or `rm -a` removes stale/exited sessions and their logs
 - Prevents accidental recursive self-attach
 - Tiny and auditable
 
@@ -120,6 +121,7 @@ If no command is given, `$SHELL` is used.
 | `clear [<session>]` | Truncate the on-disk session log. Defaults to the current session when run inside one. |
 | `tail [-f] [-n N] <session>` | Print the last N lines of the session log (default: 10). Works for both running and exited sessions. With `-f`, follow new output as it is written (useful for monitoring a running session without attaching). |
 | `list [-a]` | List sessions. Shows `[attached]` when a client is connected, `[stale]` for leftover sockets with no running master. With `-a`, also shows `[exited]` sessions that have a log file but are no longer running. Prints `(no sessions)` when the list is empty. |
+| `rm [-a] [<session>]` | Remove a session and its log. Refuses if the session is currently running — use `kill` first. Works on stale (socket exists but process is dead) and exited (log only) sessions. With `-a`, sweeps all stale and exited sessions at once. |
 | `current` | Print the current session name and exit 0 if inside a session; exit 1 silently if not. |
 
 Short aliases: `a` → `attach`, `n` → `new`, `s` → `start`, `p` → `push`,
@@ -220,6 +222,16 @@ atch tail -f work
 **Kill a session:**
 ```sh
 atch kill work
+```
+
+**Remove a stale or exited session (socket + log):**
+```sh
+atch rm crashed-job
+```
+
+**Sweep all stale and exited sessions in one go:**
+```sh
+atch rm -a
 ```
 
 ## Session storage
@@ -351,6 +363,15 @@ To wipe the on-disk log and start clean on the next attach:
 atch clear            # inside a session — clears the current session's log
 atch clear mysession  # from outside — clear a named session's log
 ```
+
+To completely remove a session that is no longer running (deletes both the socket file and the log):
+
+```sh
+atch rm mysession     # remove one stale or exited session
+atch rm -a            # remove all stale and exited sessions at once
+```
+
+`rm` refuses to touch a running session — use `atch kill` first if you want to stop and remove it.
 
 To clear the log automatically whenever you run `clear`, add a shell function
 to your `.bashrc` / `.zshrc`:

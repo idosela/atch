@@ -139,6 +139,7 @@ int replay_session_log(int saved_errno);
 int attach_main(int noerror);
 int master_main(char **argv, int waitattach, int dontfork);
 int push_main(void);
+int rm_main(int all);
 int list_main(int show_all);
 int kill_main(int force);
 

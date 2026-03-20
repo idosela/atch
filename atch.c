@@ -659,6 +659,36 @@ static int cmd_tail(int argc, char **argv)
 	return 0;
 }
 
+static int cmd_rm(int argc, char **argv)
+{
+	int all = 0;
+
+	if (argc >= 1 && strcmp(argv[0], "-a") == 0) {
+		all = 1;
+		argc--;
+		argv++;
+	}
+
+	if (all) {
+		if (argc > 0) {
+			printf("%s: Invalid number of arguments.\n", progname);
+			printf("Try '%s --help' for more information.\n",
+			       progname);
+			return 1;
+		}
+		return rm_main(1);
+	}
+
+	if (consume_session(&argc, &argv))
+		return 1;
+	if (argc > 0) {
+		printf("%s: Invalid number of arguments.\n", progname);
+		printf("Try '%s --help' for more information.\n", progname);
+		return 1;
+	}
+	return rm_main(0);
+}
+
 /* Default: atch <session> [cmd...] — attach-or-create */
 static int cmd_open(char *session, int argc, char **argv)
 {
@@ -717,6 +747,9 @@ static void usage(void)
 	       "    -f\t\t\t\tFollow log output\n"
 	       "    -n <lines>\t\t\tNumber of lines (default 10)\n"
 	       "  list    [-a]\t\t\t\tList sessions (-a includes exited)\n"
+	       "  rm      [-a] [<session>]"
+	       "\t\tRemove stale/exited session(s)\n"
+	       "    -a\t\t\t\tRemove all stale and exited sessions\n"
 	       "  current\t\t\t\tPrint current session name\n"
 	       "\n"
 	       "Options:\n"
@@ -902,6 +935,8 @@ int main(int argc, char **argv)
 		return cmd_clear(argc, argv);
 	if (is_cmd(cmd, "tail", NULL, NULL))
 		return cmd_tail(argc, argv);
+	if (is_cmd(cmd, "rm", NULL, NULL))
+		return cmd_rm(argc, argv);
 
 	/* Smart default: treat first arg as session name → attach-or-create */
 	return cmd_open((char *)cmd, argc, argv);
