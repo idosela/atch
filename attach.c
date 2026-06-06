@@ -14,7 +14,9 @@
 */
 static struct termios cur_term;
 /* 1 if the window size changed */
-static int win_changed;
+static volatile sig_atomic_t win_changed;
+/* Non-zero if a fatal signal was received; holds the signal number. */
+static volatile sig_atomic_t got_signal;
 /* Socket creation time, used to compute session age in messages. */
 time_t session_start;
 
@@ -162,26 +164,15 @@ void session_age(char *buf, size_t size)
 	format_age(now > session_start ? now - session_start : 0, buf, size);
 }
 
-/* Signal */
-static RETSIGTYPE die(int sig)
+/* Signal handler — only sets a flag; the main loop handles the rest. */
+static RETSIGTYPE die(ATTRIBUTE_UNUSED int sig)
 {
-	char age[32];
-	session_age(age, sizeof(age));
-	/* Print a nice pretty message for some things. */
-	if (sig == SIGHUP || sig == SIGINT)
-		printf("%s[%s: session '%s' detached after %s]\r\n",
-		       clear_csi_data(), progname, session_shortname(), age);
-	else
-		printf
-		    ("%s[%s: session '%s' got signal %d - exiting after %s]\r\n",
-		     clear_csi_data(), progname, session_shortname(), sig, age);
-	exit(1);
+	got_signal = sig;
 }
 
-/* Window size change. */
+/* Window size change — just sets a flag. */
 static RETSIGTYPE win_change(ATTRIBUTE_UNUSED int sig)
 {
-	signal(SIGWINCH, win_change);
 	win_changed = 1;
 }
 
@@ -357,14 +348,31 @@ int attach_main(int noerror)
 	/* Set a trap to restore the terminal when we die. */
 	atexit(restore_term);
 
-	/* Set some signals. */
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGXFSZ, SIG_IGN);
-	signal(SIGHUP, die);
-	signal(SIGTERM, die);
-	signal(SIGINT, die);
-	signal(SIGQUIT, die);
-	signal(SIGWINCH, win_change);
+	/* Set some signals. Use sigaction so handlers stay installed
+	 ** without a re-registration race, and use SA_RESTART so that
+	 ** non-EINTR syscalls are automatically restarted. */
+	{
+		struct sigaction sa_ignore, sa_die, sa_winch;
+
+		memset(&sa_ignore, 0, sizeof(sa_ignore));
+		sa_ignore.sa_handler = SIG_IGN;
+		sigaction(SIGPIPE, &sa_ignore, NULL);
+		sigaction(SIGXFSZ, &sa_ignore, NULL);
+
+		memset(&sa_die, 0, sizeof(sa_die));
+		sa_die.sa_handler = die;
+		/* Do NOT set SA_RESTART for fatal signals: we want select()
+		 ** to return with EINTR so we can check got_signal. */
+		sigaction(SIGHUP, &sa_die, NULL);
+		sigaction(SIGTERM, &sa_die, NULL);
+		sigaction(SIGINT, &sa_die, NULL);
+		sigaction(SIGQUIT, &sa_die, NULL);
+
+		memset(&sa_winch, 0, sizeof(sa_winch));
+		sa_winch.sa_handler = win_change;
+		sa_winch.sa_flags = SA_RESTART;
+		sigaction(SIGWINCH, &sa_winch, NULL);
+	}
 
 	/* Set raw mode. */
 	cur_term.c_iflag &=
@@ -420,6 +428,25 @@ int attach_main(int noerror)
 			    ("%s[%s: session '%s' select failed after %s]\r\n",
 			     clear_csi_data(), progname, session_shortname(),
 			     age);
+			exit(1);
+		}
+
+		/* Check if a fatal signal was caught. Print the message
+		 ** here in the main loop where it is safe to call
+		 ** printf / snprintf / time. */
+		if (got_signal) {
+			int sig = got_signal;
+			char age[32];
+			session_age(age, sizeof(age));
+			if (sig == SIGHUP || sig == SIGINT)
+				printf("%s[%s: session '%s' detached after %s]\r\n",
+				       clear_csi_data(), progname,
+				       session_shortname(), age);
+			else
+				printf("%s[%s: session '%s' got signal %d"
+				       " - exiting after %s]\r\n",
+				       clear_csi_data(), progname,
+				       session_shortname(), sig, age);
 			exit(1);
 		}
 
