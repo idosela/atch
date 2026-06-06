@@ -275,6 +275,10 @@ static void expand_sockname(void)
 	mkdir(dir, 0700);
 	fulllen = strlen(dir) + 1 + strlen(sockname);
 	full = malloc(fulllen + 1);
+	if (!full) {
+		printf("%s: out of memory\n", progname);
+		exit(1);
+	}
 	snprintf(full, fulllen + 1, "%s/%s", dir, sockname);
 	sockname = full;
 }
