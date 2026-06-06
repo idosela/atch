@@ -90,8 +90,21 @@ static void restore_term(void)
 		printf("\033[0m\033[?25h");
 	}
 	fflush(stdout);
-	if (no_ansiterm)
-		(void)system("tput init 2>/dev/null");
+	if (no_ansiterm) {
+		pid_t pid = fork();
+		if (pid == 0) {
+			int devnull = open("/dev/null", O_WRONLY);
+			if (devnull >= 0) {
+				dup2(devnull, 2);
+				if (devnull > 2)
+					close(devnull);
+			}
+			execlp("tput", "tput", "init", (char *)NULL);
+			_exit(127);
+		}
+		if (pid > 0)
+			waitpid(pid, NULL, 0);
+	}
 }
 
 /* Connects to a unix domain socket */
