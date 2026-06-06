@@ -647,7 +647,8 @@ static int cmd_tail(int argc, char **argv)
 		start = find_tail_start(fd, size, nlines);
 		lseek(fd, start, SEEK_SET);
 		while ((n = read(fd, rbuf, sizeof(rbuf))) > 0)
-			write(1, rbuf, (size_t)n);
+			if (write(1, rbuf, (size_t)n) < 0)
+				goto done;
 	}
 
 	if (follow) {
@@ -655,10 +656,12 @@ static int cmd_tail(int argc, char **argv)
 		for (;;) {
 			usleep(250000);
 			while ((n = read(fd, rbuf, sizeof(rbuf))) > 0)
-				write(1, rbuf, (size_t)n);
+				if (write(1, rbuf, (size_t)n) < 0)
+					goto done;
 		}
 	}
 
+ done:
 	close(fd);
 	return 0;
 }
